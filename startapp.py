@@ -129,10 +129,18 @@ def delete_task(id):
     На выходе: Сообщение об успешном удалении.
     """
     task = db.session.get(Tasklist, id)
+    if task is None:
+        return {
+            'id': id,
+            'сообщение': 'Задача отсутствует'
+        }, 404
     title = task.title
     db.session.delete(task)
     db.session.commit()
-    return f'Задача {title} успешно удалена', 204
+    return {
+        'id': id,
+        'сообщение': f'Задача "{title}" успешно удалена'
+    }, 204
 
 
 # Основной запуск
