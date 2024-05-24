@@ -1,84 +1,81 @@
-from flask import Flask, render_template, request, redirect
-import mysql.connector
+from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
+from flask_marshmallow import Marshmallow
 from datetime import datetime
-import os
 
 app = Flask(__name__)
 
-# Saving Date today in 2 different formats
-datetoday = datetime.today().strftime("%m_%d_%y")
-datetoday2 = datetime.today().strftime("%d-%B-%Y")
+db_user = 'root'
+db_pass = '12345678'
+db_name = 'tasklist'
+db_host = 'localhost'
 
-# If this file doesn't exist, create it
-if 'tasks.txt' not in os.listdir('.'):
-    with open('tasks.txt', 'w') as f:
-        f.write('')
+app.config['SQLALCHEMY_DATABASE_URI'] = \
+    f'mysql://{db_user}:{db_pass}@{db_host}:3306/{db_name}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-
-def gettasklist():
-    with open('tasks.txt', 'r') as f:
-        tasklist = f.readlines()
-    return tasklist
+db = SQLAlchemy(app)
+ma = Marshmallow(app)
 
 
-def createnewtasklist():
-    os.remove('tasks.txt')
-    with open('tasks.txt', 'w') as f:
-        f.write('')
+class Tasklist(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime, default=datetime.now())
+    updated_at = db.Column(db.DateTime, default=datetime.now())
 
 
-def updatetasklist(tasklist):
-    os.remove('tasks.txt')
-    with open('tasks.txt', 'w') as f:
-        f.writelines(tasklist)
+class TaskSchema(ma.SQLAlchemyAutoSchema):
+    class Meta:
+        model = Tasklist
 
 
-""" ROUTING FUNCTIONS """
+task_schema = TaskSchema()
+tasks_schema = TaskSchema(many=True)
 
 
-# Our main page
-@app.route('/')
-def home():
-    return render_template('home.html', datetoday2=datetoday2,
-                           tasklist=gettasklist(), l=len(gettasklist()))
+@app.route('/tasks', methods=['GET'])
+def get_tasks():
+    tasks = Tasklist.query.all()
+    return jsonify(tasks_schema.dump(tasks))
 
 
-# Function to clear the to-do list
-@app.route('/clear')
-def clear_list():
-    createnewtasklist()
-    return render_template('home.html', datetoday2=datetoday2,
-                           tasklist=gettasklist(), l=len(gettasklist()))
+@app.route('/tasks', methods=['POST'])
+def create_task():
+    title = request.json['title']
+    description = request.json.get('description', '')
+    task = Tasklist(title=title, description=description)
+    db.session.add(task)
+    db.session.commit()
+    return jsonify(task_schema.dump(task))
 
 
-# Function to add a task to the to-do list
-@app.route('/addtask', methods=['POST'])
-def add_task():
-    task = request.form.get('newtask')
-    with open('tasks.txt', 'a') as f:
-        f.writelines(task + '\n')
-    return render_template('home.html', datetoday2=datetoday2,
-                           tasklist=gettasklist(), l=len(gettasklist()))
+@app.route('/tasks/<int:id>', methods=['GET'])
+def get_task(id):
+    task = db.session.get(Tasklist, id)
+    return jsonify(task_schema.dump(task))
 
 
-# Function to remove a task from the to-do list
-@app.route('/deltask', methods=['GET'])
-def remove_task():
-    task_index = int(request.args.get('deltaskid'))
-    tasklist = gettasklist()
-    print(task_index)
-    print(tasklist)
-    if task_index < 0 or task_index > len(tasklist):
-        return render_template('home.html', datetoday2=datetoday2,
-                               tasklist=tasklist, l=len(tasklist),
-                               mess='Invalid Index...')
-    else:
-        removed_task = tasklist.pop(task_index)
-    updatetasklist(tasklist)
-    return render_template('home.html', datetoday2=datetoday2,
-                           tasklist=tasklist, l=len(tasklist))
+@app.route('/tasks/<int:id>', methods=['PUT'])
+def update_task(id):
+    task = db.session.get(Tasklist, id)
+    title = request.json['title']
+    description = request.json.get('description', '')
+    task.title = task.title if not title else title
+    task.description = task.description if not description else description
+    task.updated_at = datetime.now()
+    db.session.commit()
+    return jsonify(task_schema.dump(task))
 
 
-# Our main function which runs the Flask App
+@app.route('/tasks/<int:id>', methods=['DELETE'])
+def delete_task(id):
+    task = db.session.get(Tasklist, id)
+    db.session.delete(task)
+    db.session.commit()
+    return 'Успешно удалено', 204
+
+
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)
